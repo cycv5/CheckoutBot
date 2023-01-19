@@ -17,11 +17,6 @@ def create_connection(db_file):
 if __name__ == '__main__':
     conn = create_connection(r"./checkoutdb.db")
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS barcode_list(barcode TEXT PRIMARY KEY, name TEXT, price TEXT)")
-    res = cursor.execute("SELECT name FROM sqlite_master")
-    print(res.fetchone())
-
-cursor.execute("""
-    INSERT INTO barcode_list VALUES
-        ('001', 'book', '8.2')
-""")
+res = cursor.execute("SELECT * from 'barcode_list';")
+print(res.fetchall())
+conn.commit()
