@@ -84,7 +84,8 @@ const Drawer = styled(MuiDrawer, { shouldForwardProp: (prop) => prop !== 'open' 
 
 const mdTheme = createTheme();
 
-function DashboardContent() {
+function DashboardContent(props) {
+  console.log(props)
   const [open, setOpen] = React.useState(true);
   const toggleDrawer = () => {
     setOpen(!open);
@@ -192,7 +193,7 @@ function DashboardContent() {
               {/* Recent Orders */}
               <Grid item xs={12}>
                 <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column' }}>
-                  <Orders />
+                  <Orders items={props.items} />
                 </Paper>
               </Grid>
             </Grid>
@@ -204,6 +205,10 @@ function DashboardContent() {
   );
 }
 
-export default function Dashboard() {
-  return <DashboardContent />;
+export default function Dashboard(props) {
+  React.useEffect(()=>{
+    console.log("Props changed")
+    console.log(props)
+  }, [props])
+  return (<DashboardContent items={props.items}/>);
 }

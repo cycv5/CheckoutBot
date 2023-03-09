@@ -2,6 +2,10 @@ import sqlite3
 from sqlite3 import Error
 
 
+
+
+
+
 def create_connection(db_file):
     """ create a database connection to a SQLite database """
     conn = None
@@ -14,9 +18,13 @@ def create_connection(db_file):
         return conn
 
 
-if __name__ == '__main__':
+
+def get_item_from_barcode(barcode):
     conn = create_connection(r"./checkoutdb.db")
     cursor = conn.cursor()
-res = cursor.execute("SELECT * from 'barcode_list';")
-print(res.fetchall())
-conn.commit()
+    res = cursor.execute("SELECT * from 'items' where barcode="+barcode+" LIMIT 1; ")
+    # res = cursor.execute("SELECT sql FROM sqlite_master WHERE tbl_name = 'table_name' AND type = 'table';")
+    items = res.fetchall()
+    conn.commit()
+    return items
+

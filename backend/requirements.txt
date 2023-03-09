@@ -15,7 +15,7 @@ tqdm>=4.64.0
 protobuf<4.21.3  # https://github.com/ultralytics/yolov5/issues/8012
 
 # Base Server
-python-socketio==5.7.2
+python-socketio==4.6.1
 eventlet
 # Logging -------------------------------------
 tensorboard>=2.4.1

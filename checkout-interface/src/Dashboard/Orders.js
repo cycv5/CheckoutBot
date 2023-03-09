@@ -54,7 +54,13 @@ function preventDefault(event) {
   event.preventDefault();
 }
 
-export default function Orders() {
+export default function Orders(props) {
+  React.useEffect(()=>{
+    console.log("ORDERS", props.items)
+    setTableRows(props.items.map((item)=>{return createData(1, item.barcode, item.name, item.price, item.tax, item.price+item.tax) }))
+  }, [props.items])
+
+  const [tableRows, setTableRows] = React.useState([])
   return (
     <React.Fragment>
       <Title>Items Scanned</Title>
@@ -70,7 +76,7 @@ export default function Orders() {
           </TableRow>
         </TableHead>
         <TableBody>
-          {rows.map((row) => (
+          {tableRows.map((row) => (
             <TableRow key={row.id}>
               <TableCell>{row.date}</TableCell>
               <TableCell>{row.name}</TableCell>
