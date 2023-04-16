@@ -1,2 +1,3 @@
 checkout-interface/node_modules/
 node_modules/
+/backend/vision/test_vid.mp4
