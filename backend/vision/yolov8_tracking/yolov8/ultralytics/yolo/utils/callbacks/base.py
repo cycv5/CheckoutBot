@@ -1,9 +1,7 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Ultralytics YOLO 🚀, GPL-3.0 license
 """
 Base callbacks
 """
-from collections import defaultdict
-from copy import deepcopy
 
 
 # Trainer callbacks ----------------------------------------------------------------------------------------------------
@@ -93,10 +91,6 @@ def on_predict_batch_end(predictor):
     pass
 
 
-def on_predict_postprocess_end(predictor):
-    pass
-
-
 def on_predict_end(predictor):
     pass
 
@@ -136,7 +130,6 @@ default_callbacks = {
     # Run in predictor
     'on_predict_start': [on_predict_start],
     'on_predict_batch_start': [on_predict_batch_start],
-    'on_predict_postprocess_end': [on_predict_postprocess_end],
     'on_predict_batch_end': [on_predict_batch_end],
     'on_predict_end': [on_predict_end],
 
@@ -145,20 +138,12 @@ default_callbacks = {
     'on_export_end': [on_export_end]}
 
 
-def get_default_callbacks():
-    return defaultdict(list, deepcopy(default_callbacks))
-
-
 def add_integration_callbacks(instance):
     from .clearml import callbacks as clearml_callbacks
     from .comet import callbacks as comet_callbacks
     from .hub import callbacks as hub_callbacks
-    from .mlflow import callbacks as mf_callbacks
-    from .raytune import callbacks as tune_callbacks
     from .tensorboard import callbacks as tb_callbacks
-    from .wb import callbacks as wb_callbacks
 
-    for x in clearml_callbacks, comet_callbacks, hub_callbacks, tb_callbacks, mf_callbacks, tune_callbacks, wb_callbacks:
+    for x in clearml_callbacks, comet_callbacks, hub_callbacks, tb_callbacks:
         for k, v in x.items():
-            if v not in instance.callbacks[k]:  # prevent duplicate callbacks addition
-                instance.callbacks[k].append(v)  # callback[name].append(func)
+            instance.callbacks[k].append(v)  # callback[name].append(func)

@@ -1,4 +1,4 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Ultralytics YOLO 🚀, GPL-3.0 license
 """
 Common modules
 """
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pandas as pd
 import requests
 import torch
 import torch.nn as nn
@@ -78,7 +79,7 @@ class AutoShape(nn.Module):
                 with amp.autocast(autocast):
                     return self.model(ims.to(p.device).type_as(p), augment=augment)  # inference
 
-            # Preprocess
+            # Pre-process
             n, ims = (len(ims), list(ims)) if isinstance(ims, (list, tuple)) else (1, [ims])  # number, list of images
             shape0, shape1, files = [], [], []  # image and inference shapes, filenames
             for i, im in enumerate(ims):
@@ -98,7 +99,7 @@ class AutoShape(nn.Module):
                 shape1.append([y * g for y in s])
                 ims[i] = im if im.data.contiguous else np.ascontiguousarray(im)  # update
             shape1 = [make_divisible(x, self.stride) for x in np.array(shape1).max(0)] if self.pt else size  # inf shape
-            x = [LetterBox(shape1, auto=False)(image=im)['img'] for im in ims]  # pad
+            x = [LetterBox(shape1, auto=False)(image=im)["img"] for im in ims]  # pad
             x = np.ascontiguousarray(np.array(x).transpose((0, 3, 1, 2)))  # stack and BHWC to BCHW
             x = torch.from_numpy(x).to(p.device).type_as(p) / 255  # uint8 to fp16/32
 
@@ -107,7 +108,7 @@ class AutoShape(nn.Module):
             with dt[1]:
                 y = self.model(x, augment=augment)  # forward
 
-            # Postprocess
+            # Post-process
             with dt[2]:
                 y = non_max_suppression(y if self.dmb else y[0],
                                         self.conf,
@@ -180,7 +181,7 @@ class Detections:
                 self.ims[i] = np.asarray(im)
         if pprint:
             s = s.lstrip('\n')
-            return f'{s}\nSpeed: %.1fms preprocess, %.1fms inference, %.1fms NMS per image at shape {self.s}' % self.t
+            return f'{s}\nSpeed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {self.s}' % self.t
         if crop:
             if save:
                 LOGGER.info(f'Saved results to {save_dir}\n')
@@ -203,13 +204,12 @@ class Detections:
 
     def pandas(self):
         # return detections as pandas DataFrames, i.e. print(results.pandas().xyxy[0])
-        import pandas
         new = copy(self)  # return copy
         ca = 'xmin', 'ymin', 'xmax', 'ymax', 'confidence', 'class', 'name'  # xyxy columns
         cb = 'xcenter', 'ycenter', 'width', 'height', 'confidence', 'class', 'name'  # xywh columns
         for k, c in zip(['xyxy', 'xyxyn', 'xywh', 'xywhn'], [ca, ca, cb, cb]):
             a = [[x[:5] + [int(x[5]), self.names[int(x[5])]] for x in x.tolist()] for x in getattr(self, k)]  # update
-            setattr(new, k, [pandas.DataFrame(x, columns=c) for x in a])
+            setattr(new, k, [pd.DataFrame(x, columns=c) for x in a])
         return new
 
     def tolist(self):
@@ -232,3 +232,6 @@ class Detections:
 
     def __repr__(self):
         return f'YOLOv8 {self.__class__} instance\n' + self.__str__()
+
+
+print('works')

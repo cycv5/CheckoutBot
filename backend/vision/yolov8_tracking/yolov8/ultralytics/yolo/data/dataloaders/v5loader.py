@@ -1,4 +1,4 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Ultralytics YOLO 🚀, GPL-3.0 license
 """
 Dataloaders and dataset utils
 """
@@ -6,6 +6,7 @@ Dataloaders and dataset utils
 import contextlib
 import glob
 import hashlib
+import json
 import math
 import os
 import random
@@ -22,13 +23,15 @@ import numpy as np
 import psutil
 import torch
 import torchvision
+import yaml
 from PIL import ExifTags, Image, ImageOps
 from torch.utils.data import DataLoader, Dataset, dataloader, distributed
 from tqdm import tqdm
 
+from ultralytics.yolo.data.utils import check_det_dataset, unzip_file
 from ultralytics.yolo.utils import (DATASETS_DIR, LOGGER, NUM_THREADS, TQDM_BAR_FORMAT, is_colab, is_dir_writeable,
                                     is_kaggle)
-from ultralytics.yolo.utils.checks import check_requirements
+from ultralytics.yolo.utils.checks import check_requirements, check_yaml
 from ultralytics.yolo.utils.ops import clean_str, segments2boxes, xyn2xy, xywh2xyxy, xywhn2xyxy, xyxy2xywhn
 from ultralytics.yolo.utils.torch_utils import torch_distributed_zero_first
 
@@ -52,7 +55,7 @@ for orientation in ExifTags.TAGS.keys():
 def get_hash(paths):
     # Returns a single hash value of a list of paths (files or dirs)
     size = sum(os.path.getsize(p) for p in paths if os.path.exists(p))  # sizes
-    h = hashlib.sha256(str(size).encode())  # hash sizes
+    h = hashlib.md5(str(size).encode())  # hash sizes
     h.update(''.join(paths).encode())  # hash paths
     return h.hexdigest()  # return hash
 
@@ -89,7 +92,7 @@ def exif_transpose(image):
         if method is not None:
             image = image.transpose(method)
             del exif[0x0112]
-            image.info['exif'] = exif.tobytes()
+            image.info["exif"] = exif.tobytes()
     return image
 
 
@@ -214,11 +217,11 @@ class LoadScreenshots:
 
         # Parse monitor shape
         monitor = self.sct.monitors[self.screen]
-        self.top = monitor['top'] if top is None else (monitor['top'] + top)
-        self.left = monitor['left'] if left is None else (monitor['left'] + left)
-        self.width = width or monitor['width']
-        self.height = height or monitor['height']
-        self.monitor = {'left': self.left, 'top': self.top, 'width': self.width, 'height': self.height}
+        self.top = monitor["top"] if top is None else (monitor["top"] + top)
+        self.left = monitor["left"] if left is None else (monitor["left"] + left)
+        self.width = width or monitor["width"]
+        self.height = height or monitor["height"]
+        self.monitor = {"left": self.left, "top": self.top, "width": self.width, "height": self.height}
 
     def __iter__(self):
         return self
@@ -226,7 +229,7 @@ class LoadScreenshots:
     def __next__(self):
         # mss screen capture: get raw pixels from the screen as np array
         im0 = np.array(self.sct.grab(self.monitor))[:, :, :3]  # [:, :, :3] BGRA to BGR
-        s = f'screen {self.screen} (LTWH): {self.left},{self.top},{self.width},{self.height}: '
+        s = f"screen {self.screen} (LTWH): {self.left},{self.top},{self.width},{self.height}: "
 
         if self.transforms:
             im = self.transforms(im0)  # transforms
@@ -241,7 +244,7 @@ class LoadScreenshots:
 class LoadImages:
     # YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`
     def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
-        if isinstance(path, str) and Path(path).suffix == '.txt':  # *.txt file with img/vid/dir on each line
+        if isinstance(path, str) and Path(path).suffix == ".txt":  # *.txt file with img/vid/dir on each line
             path = Path(path).read_text().rsplit()
         files = []
         for p in sorted(path) if isinstance(path, (list, tuple)) else [path]:
@@ -360,7 +363,7 @@ class LoadStreams:
                 # YouTube format i.e. 'https://www.youtube.com/watch?v=Zgi9g1ksQHc' or 'https://youtu.be/Zgi9g1ksQHc'
                 check_requirements(('pafy', 'youtube_dl==2020.12.2'))
                 import pafy
-                s = pafy.new(s).getbest(preftype='mp4').url  # YouTube URL
+                s = pafy.new(s).getbest(preftype="mp4").url  # YouTube URL
             s = eval(s) if s.isnumeric() else s  # i.e. s = '0' local webcam
             if s == 0:
                 assert not is_colab(), '--source 0 webcam unsupported on Colab. Rerun command in a local environment.'
@@ -375,7 +378,7 @@ class LoadStreams:
 
             _, self.imgs[i] = cap.read()  # guarantee first frame
             self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
-            LOGGER.info(f'{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)')
+            LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
             self.threads[i].start()
         LOGGER.info('')  # newline
 
@@ -496,8 +499,8 @@ class LoadImagesAndLabels(Dataset):
 
         # Display cache
         nf, nm, ne, nc, n = cache.pop('results')  # found, missing, empty, corrupt, total
-        if exists and LOCAL_RANK in (-1, 0):
-            d = f'Scanning {cache_path}... {nf} images, {nm + ne} backgrounds, {nc} corrupt'
+        if exists and LOCAL_RANK in {-1, 0}:
+            d = f"Scanning {cache_path}... {nf} images, {nm + ne} backgrounds, {nc} corrupt"
             tqdm(None, desc=prefix + d, total=n, initial=n, bar_format=TQDM_BAR_FORMAT)  # display cache results
             if cache['msgs']:
                 LOGGER.info('\n'.join(cache['msgs']))  # display warnings
@@ -539,7 +542,7 @@ class LoadImagesAndLabels(Dataset):
                 j = (label[:, 0:1] == include_class_array).any(1)
                 self.labels[i] = label[j]
                 if segment:
-                    self.segments[i] = [segment[si] for si, idx in enumerate(j) if idx]
+                    self.segments[i] = segment[j]
             if single_cls:  # single-class training, merge all classes into 0
                 self.labels[i][:, 0] = 0
 
@@ -601,8 +604,8 @@ class LoadImagesAndLabels(Dataset):
         mem = psutil.virtual_memory()
         cache = mem_required * (1 + safety_margin) < mem.available  # to cache or not to cache, that is the question
         if not cache:
-            LOGGER.info(f'{prefix}{mem_required / gb:.1f}GB RAM required, '
-                        f'{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, '
+            LOGGER.info(f"{prefix}{mem_required / gb:.1f}GB RAM required, "
+                        f"{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, "
                         f"{'caching images ✅' if cache else 'not caching images ⚠️'}")
         return cache
 
@@ -612,7 +615,7 @@ class LoadImagesAndLabels(Dataset):
             path.unlink()  # remove *.cache file if exists
         x = {}  # dict
         nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # number missing, found, empty, corrupt, messages
-        desc = f'{prefix}Scanning {path.parent / path.stem}...'
+        desc = f"{prefix}Scanning {path.parent / path.stem}..."
         total = len(self.im_files)
         with ThreadPool(NUM_THREADS) as pool:
             results = pool.imap(verify_image_label, zip(self.im_files, self.label_files, repeat(prefix)))
@@ -626,7 +629,7 @@ class LoadImagesAndLabels(Dataset):
                     x[im_file] = [lb, shape, segments]
                 if msg:
                     msgs.append(msg)
-                pbar.desc = f'{desc} {nf} images, {nm + ne} backgrounds, {nc} corrupt'
+                pbar.desc = f"{desc} {nf} images, {nm + ne} backgrounds, {nc} corrupt"
             pbar.close()
 
         if msgs:
@@ -1034,6 +1037,128 @@ def verify_image_label(args):
         return [None, None, None, None, nm, nf, ne, nc, msg]
 
 
+class HUBDatasetStats():
+    """ Class for generating HUB dataset JSON and `-hub` dataset directory
+
+    Arguments
+        path:           Path to data.yaml or data.zip (with data.yaml inside data.zip)
+        autodownload:   Attempt to download dataset if not found locally
+
+    Usage
+        from utils.dataloaders import HUBDatasetStats
+        stats = HUBDatasetStats('coco128.yaml', autodownload=True)  # usage 1
+        stats = HUBDatasetStats('path/to/coco128.zip')  # usage 2
+        stats.get_json(save=False)
+        stats.process_images()
+    """
+
+    def __init__(self, path='coco128.yaml', autodownload=False):
+        # Initialize class
+        zipped, data_dir, yaml_path = self._unzip(Path(path))
+        try:
+            with open(check_yaml(yaml_path), errors='ignore') as f:
+                data = yaml.safe_load(f)  # data dict
+                if zipped:
+                    data['path'] = data_dir
+        except Exception as e:
+            raise Exception("error/HUB/dataset_stats/yaml_load") from e
+
+        check_det_dataset(data, autodownload)  # download dataset if missing
+        self.hub_dir = Path(data['path'] + '-hub')
+        self.im_dir = self.hub_dir / 'images'
+        self.im_dir.mkdir(parents=True, exist_ok=True)  # makes /images
+        self.stats = {'nc': data['nc'], 'names': list(data['names'].values())}  # statistics dictionary
+        self.data = data
+
+    @staticmethod
+    def _find_yaml(dir):
+        # Return data.yaml file
+        files = list(dir.glob('*.yaml')) or list(dir.rglob('*.yaml'))  # try root level first and then recursive
+        assert files, f'No *.yaml file found in {dir}'
+        if len(files) > 1:
+            files = [f for f in files if f.stem == dir.stem]  # prefer *.yaml files that match dir name
+            assert files, f'Multiple *.yaml files found in {dir}, only 1 *.yaml file allowed'
+        assert len(files) == 1, f'Multiple *.yaml files found: {files}, only 1 *.yaml file allowed in {dir}'
+        return files[0]
+
+    def _unzip(self, path):
+        # Unzip data.zip
+        if not str(path).endswith('.zip'):  # path is data.yaml
+            return False, None, path
+        assert Path(path).is_file(), f'Error unzipping {path}, file not found'
+        unzip_file(path, path=path.parent)
+        dir = path.with_suffix('')  # dataset directory == zip name
+        assert dir.is_dir(), f'Error unzipping {path}, {dir} not found. path/to/abc.zip MUST unzip to path/to/abc/'
+        return True, str(dir), self._find_yaml(dir)  # zipped, data_dir, yaml_path
+
+    def _hub_ops(self, f, max_dim=1920):
+        # HUB ops for 1 image 'f': resize and save at reduced quality in /dataset-hub for web/app viewing
+        f_new = self.im_dir / Path(f).name  # dataset-hub image filename
+        try:  # use PIL
+            im = Image.open(f)
+            r = max_dim / max(im.height, im.width)  # ratio
+            if r < 1.0:  # image too large
+                im = im.resize((int(im.width * r), int(im.height * r)))
+            im.save(f_new, 'JPEG', quality=50, optimize=True)  # save
+        except Exception as e:  # use OpenCV
+            LOGGER.info(f'WARNING ⚠️ HUB ops PIL failure {f}: {e}')
+            im = cv2.imread(f)
+            im_height, im_width = im.shape[:2]
+            r = max_dim / max(im_height, im_width)  # ratio
+            if r < 1.0:  # image too large
+                im = cv2.resize(im, (int(im_width * r), int(im_height * r)), interpolation=cv2.INTER_AREA)
+            cv2.imwrite(str(f_new), im)
+
+    def get_json(self, save=False, verbose=False):
+        # Return dataset JSON for Ultralytics HUB
+        def _round(labels):
+            # Update labels to integer class and 6 decimal place floats
+            return [[int(c), *(round(x, 4) for x in points)] for c, *points in labels]
+
+        for split in 'train', 'val', 'test':
+            if self.data.get(split) is None:
+                self.stats[split] = None  # i.e. no test set
+                continue
+            dataset = LoadImagesAndLabels(self.data[split])  # load dataset
+            x = np.array([
+                np.bincount(label[:, 0].astype(int), minlength=self.data['nc'])
+                for label in tqdm(dataset.labels, total=dataset.n, desc='Statistics')])  # shape(128x80)
+            self.stats[split] = {
+                'instance_stats': {
+                    'total': int(x.sum()),
+                    'per_class': x.sum(0).tolist()},
+                'image_stats': {
+                    'total': dataset.n,
+                    'unlabelled': int(np.all(x == 0, 1).sum()),
+                    'per_class': (x > 0).sum(0).tolist()},
+                'labels': [{
+                    str(Path(k).name): _round(v.tolist())} for k, v in zip(dataset.im_files, dataset.labels)]}
+
+        # Save, print and return
+        if save:
+            stats_path = self.hub_dir / 'stats.json'
+            print(f'Saving {stats_path.resolve()}...')
+            with open(stats_path, 'w') as f:
+                json.dump(self.stats, f)  # save stats.json
+        if verbose:
+            print(json.dumps(self.stats, indent=2, sort_keys=False))
+        return self.stats
+
+    def process_images(self):
+        # Compress images for Ultralytics HUB
+        for split in 'train', 'val', 'test':
+            if self.data.get(split) is None:
+                continue
+            dataset = LoadImagesAndLabels(self.data[split])  # load dataset
+            desc = f'{split} images'
+            total = dataset.n
+            with ThreadPool(NUM_THREADS) as pool:
+                for _ in tqdm(pool.imap(self._hub_ops, dataset.im_files), total=total, desc=desc):
+                    pass
+        print(f'Done. All images saved to {self.im_dir}')
+        return self.im_dir
+
+
 # Classification dataloaders -------------------------------------------------------------------------------------------
 class ClassificationDataset(torchvision.datasets.ImageFolder):
     """
@@ -1063,7 +1188,7 @@ class ClassificationDataset(torchvision.datasets.ImageFolder):
         else:  # read image
             im = cv2.imread(f)  # BGR
         if self.album_transforms:
-            sample = self.album_transforms(image=cv2.cvtColor(im, cv2.COLOR_BGR2RGB))['image']
+            sample = self.album_transforms(image=cv2.cvtColor(im, cv2.COLOR_BGR2RGB))["image"]
         else:
             sample = self.torch_transforms(im)
         return sample, j

@@ -1,4 +1,4 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Ultralytics YOLO 🚀, GPL-3.0 license
 # Builds ultralytics/ultralytics:latest images on DockerHub https://hub.docker.com/r/ultralytics
 
 name: Publish Docker Images
@@ -29,7 +29,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push arm64 image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v3
         continue-on-error: true
         with:
           context: .
@@ -38,18 +38,8 @@ jobs:
           push: true
           tags: ultralytics/ultralytics:latest-arm64
 
-      - name: Build and push Jetson image
-        uses: docker/build-push-action@v4
-        continue-on-error: true
-        with:
-          context: .
-          platforms: linux/arm64
-          file: docker/Dockerfile-jetson
-          push: true
-          tags: ultralytics/ultralytics:latest-jetson
-
       - name: Build and push CPU image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v3
         continue-on-error: true
         with:
           context: .
@@ -58,7 +48,7 @@ jobs:
           tags: ultralytics/ultralytics:latest-cpu
 
       - name: Build and push GPU image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v3
         continue-on-error: true
         with:
           context: .

@@ -1,8 +1,7 @@
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Ultralytics YOLO 🚀, GPL-3.0 license
 
 import contextlib
 from copy import deepcopy
-from pathlib import Path
 
 import thop
 import torch
@@ -10,11 +9,11 @@ import torch.nn as nn
 
 from ultralytics.nn.modules import (C1, C2, C3, C3TR, SPP, SPPF, Bottleneck, BottleneckCSP, C2f, C3Ghost, C3x, Classify,
                                     Concat, Conv, ConvTranspose, Detect, DWConv, DWConvTranspose2d, Ensemble, Focus,
-                                    GhostBottleneck, GhostConv, Pose, Segment)
-from ultralytics.yolo.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
-from ultralytics.yolo.utils.checks import check_requirements, check_suffix, check_yaml
-from ultralytics.yolo.utils.torch_utils import (fuse_conv_and_bn, fuse_deconv_and_bn, initialize_weights,
-                                                intersect_dicts, make_divisible, model_info, scale_img, time_sync)
+                                    GhostBottleneck, GhostConv, Segment)
+from ultralytics.yolo.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, yaml_load
+from ultralytics.yolo.utils.checks import check_requirements, check_yaml
+from ultralytics.yolo.utils.torch_utils import (fuse_conv_and_bn, initialize_weights, intersect_dicts, make_divisible,
+                                                model_info, scale_img, time_sync)
 
 
 class BaseModel(nn.Module):
@@ -76,7 +75,7 @@ class BaseModel(nn.Module):
             None
         """
         c = m == self.model[-1]  # is final layer, copy input as inplace fix
-        o = thop.profile(m, inputs=[x.clone() if c else x], verbose=False)[0] / 1E9 * 2 if thop else 0  # FLOPs
+        o = thop.profile(m, inputs=(x.clone() if c else x,), verbose=False)[0] / 1E9 * 2 if thop else 0  # FLOPs
         t = time_sync()
         for _ in range(10):
             m(x.clone() if c else x)
@@ -87,7 +86,7 @@ class BaseModel(nn.Module):
         if c:
             LOGGER.info(f"{sum(dt):10.2f} {'-':>10s} {'-':>10s}  Total")
 
-    def fuse(self, verbose=True):
+    def fuse(self):
         """
         Fuse the `Conv2d()` and `BatchNorm2d()` layers of the model into a single layer, in order to improve the
         computation efficiency.
@@ -101,11 +100,7 @@ class BaseModel(nn.Module):
                     m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
                     delattr(m, 'bn')  # remove batchnorm
                     m.forward = m.forward_fuse  # update forward
-                if isinstance(m, ConvTranspose) and hasattr(m, 'bn'):
-                    m.conv_transpose = fuse_deconv_and_bn(m.conv_transpose, m.bn)
-                    delattr(m, 'bn')  # remove batchnorm
-                    m.forward = m.forward_fuse  # update forward
-            self.info(verbose=verbose)
+            self.info()
 
         return self
 
@@ -122,7 +117,7 @@ class BaseModel(nn.Module):
         bn = tuple(v for k, v in nn.__dict__.items() if 'Norm' in k)  # normalization layers, i.e. BatchNorm2d()
         return sum(isinstance(v, bn) for v in self.modules()) < thresh  # True if < 'thresh' BatchNorm layers in model
 
-    def info(self, verbose=True, imgsz=640):
+    def info(self, verbose=False, imgsz=640):
         """
         Prints model information
 
@@ -130,7 +125,7 @@ class BaseModel(nn.Module):
             verbose (bool): if True, prints out the model information. Defaults to False
             imgsz (int): the size of the image that the model will be trained on. Defaults to 640
         """
-        model_info(self, verbose=verbose, imgsz=imgsz)
+        model_info(self, verbose, imgsz)
 
     def _apply(self, fn):
         """
@@ -151,42 +146,38 @@ class BaseModel(nn.Module):
             m.strides = fn(m.strides)
         return self
 
-    def load(self, weights, verbose=True):
-        """Load the weights into the model.
+    def load(self, weights):
+        """
+        This function loads the weights of the model from a file
 
         Args:
-            weights (dict) or (torch.nn.Module): The pre-trained weights to be loaded.
-            verbose (bool, optional): Whether to log the transfer progress. Defaults to True.
+            weights (str): The weights to load into the model.
         """
-        model = weights['model'] if isinstance(weights, dict) else weights  # torchvision models are not dicts
-        csd = model.float().state_dict()  # checkpoint state_dict as FP32
-        csd = intersect_dicts(csd, self.state_dict())  # intersect
-        self.load_state_dict(csd, strict=False)  # load
-        if verbose:
-            LOGGER.info(f'Transferred {len(csd)}/{len(self.model.state_dict())} items from pretrained weights')
+        # Force all tasks to implement this function
+        raise NotImplementedError("This function needs to be implemented by derived classes!")
 
 
 class DetectionModel(BaseModel):
     # YOLOv8 detection model
     def __init__(self, cfg='yolov8n.yaml', ch=3, nc=None, verbose=True):  # model, input channels, number of classes
         super().__init__()
-        self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
+        self.yaml = cfg if isinstance(cfg, dict) else yaml_load(check_yaml(cfg), append_filename=True)  # cfg dict
 
         # Define model
         ch = self.yaml['ch'] = self.yaml.get('ch', ch)  # input channels
         if nc and nc != self.yaml['nc']:
             LOGGER.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
             self.yaml['nc'] = nc  # override yaml value
-        self.model, self.save = parse_model(deepcopy(self.yaml), ch=ch, verbose=verbose)  # model, savelist
+        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch], verbose=verbose)  # model, savelist
         self.names = {i: f'{i}' for i in range(self.yaml['nc'])}  # default names dict
         self.inplace = self.yaml.get('inplace', True)
 
         # Build strides
         m = self.model[-1]  # Detect()
-        if isinstance(m, (Detect, Segment, Pose)):
+        if isinstance(m, (Detect, Segment)):
             s = 256  # 2x min stride
             m.inplace = self.inplace
-            forward = lambda x: self.forward(x)[0] if isinstance(m, (Segment, Pose)) else self.forward(x)
+            forward = lambda x: self.forward(x)[0] if isinstance(m, Segment) else self.forward(x)
             m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
             self.stride = m.stride
             m.bias_init()  # only run once
@@ -238,25 +229,18 @@ class DetectionModel(BaseModel):
         y[-1] = y[-1][..., i:]  # small
         return y
 
+    def load(self, weights, verbose=True):
+        csd = weights.float().state_dict()  # checkpoint state_dict as FP32
+        csd = intersect_dicts(csd, self.state_dict())  # intersect
+        self.load_state_dict(csd, strict=False)  # load
+        if verbose:
+            LOGGER.info(f'Transferred {len(csd)}/{len(self.model.state_dict())} items from pretrained weights')
+
 
 class SegmentationModel(DetectionModel):
     # YOLOv8 segmentation model
     def __init__(self, cfg='yolov8n-seg.yaml', ch=3, nc=None, verbose=True):
-        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
-
-    def _forward_augment(self, x):
-        raise NotImplementedError(emojis('WARNING ⚠️ SegmentationModel has not supported augment inference yet!'))
-
-
-class PoseModel(DetectionModel):
-    # YOLOv8 pose model
-    def __init__(self, cfg='yolov8n-pose.yaml', ch=3, nc=None, data_kpt_shape=(None, None), verbose=True):
-        if not isinstance(cfg, dict):
-            cfg = yaml_model_load(cfg)  # load model YAML
-        if any(data_kpt_shape) and list(data_kpt_shape) != list(cfg['kpt_shape']):
-            LOGGER.info(f"Overriding model.yaml kpt_shape={cfg['kpt_shape']} with kpt_shape={data_kpt_shape}")
-            cfg['kpt_shape'] = data_kpt_shape
-        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
+        super().__init__(cfg, ch, nc, verbose)
 
 
 class ClassificationModel(BaseModel):
@@ -265,7 +249,7 @@ class ClassificationModel(BaseModel):
                  cfg=None,
                  model=None,
                  ch=3,
-                 nc=None,
+                 nc=1000,
                  cutoff=10,
                  verbose=True):  # yaml, model, channels, number of classes, cutoff index, verbose flag
         super().__init__()
@@ -288,19 +272,21 @@ class ClassificationModel(BaseModel):
         self.nc = nc
 
     def _from_yaml(self, cfg, ch, nc, verbose):
-        self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
-
+        self.yaml = cfg if isinstance(cfg, dict) else yaml_load(check_yaml(cfg), append_filename=True)  # cfg dict
         # Define model
         ch = self.yaml['ch'] = self.yaml.get('ch', ch)  # input channels
         if nc and nc != self.yaml['nc']:
             LOGGER.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
             self.yaml['nc'] = nc  # override yaml value
-        elif not nc and not self.yaml.get('nc', None):
-            raise ValueError('nc not specified. Must specify nc in model.yaml or function arguments.')
-        self.model, self.save = parse_model(deepcopy(self.yaml), ch=ch, verbose=verbose)  # model, savelist
-        self.stride = torch.Tensor([1])  # no stride constraints
+        self.model, self.save = parse_model(deepcopy(self.yaml), ch=[ch], verbose=verbose)  # model, savelist
         self.names = {i: f'{i}' for i in range(self.yaml['nc'])}  # default names dict
         self.info()
+
+    def load(self, weights):
+        model = weights["model"] if isinstance(weights, dict) else weights  # torchvision models are not dicts
+        csd = model.float().state_dict()
+        csd = intersect_dicts(csd, self.state_dict())  # intersect
+        self.load_state_dict(csd, strict=False)  # load
 
     @staticmethod
     def reshape_outputs(model, nc):
@@ -329,9 +315,9 @@ class ClassificationModel(BaseModel):
 
 def torch_safe_load(weight):
     """
-    This function attempts to load a PyTorch model with the torch.load() function. If a ModuleNotFoundError is raised,
-    it catches the error, logs a warning message, and attempts to install the missing module via the
-    check_requirements() function. After installation, the function again attempts to load the model using torch.load().
+    This function attempts to load a PyTorch model with the torch.load() function. If a ModuleNotFoundError is raised, it
+    catches the error, logs a warning message, and attempts to install the missing module via the check_requirements()
+    function. After installation, the function again attempts to load the model using torch.load().
 
     Args:
         weight (str): The file path of the PyTorch model.
@@ -339,50 +325,41 @@ def torch_safe_load(weight):
     Returns:
         The loaded PyTorch model.
     """
-    from ultralytics.yolo.utils.downloads import attempt_download_asset
+    from ultralytics.yolo.utils.downloads import attempt_download
 
-    check_suffix(file=weight, suffix='.pt')
-    file = attempt_download_asset(weight)  # search online if missing locally
+    file = attempt_download(weight)  # search online if missing locally
     try:
-        return torch.load(file, map_location='cpu'), file  # load
-    except ModuleNotFoundError as e:  # e.name is missing module name
-        if e.name == 'models':
-            raise TypeError(
-                emojis(f'ERROR ❌️ {weight} appears to be an Ultralytics YOLOv5 model originally trained '
-                       f'with https://github.com/ultralytics/yolov5.\nThis model is NOT forwards compatible with '
-                       f'YOLOv8 at https://github.com/ultralytics/ultralytics.'
-                       f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
-                       f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'")) from e
-        LOGGER.warning(f"WARNING ⚠️ {weight} appears to require '{e.name}', which is not in ultralytics requirements."
-                       f"\nAutoInstall will run now for '{e.name}' but this feature will be removed in the future."
-                       f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
-                       f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'")
+        return torch.load(file, map_location='cpu')  # load
+    except ModuleNotFoundError as e:
+        if e.name == 'omegaconf':  # e.name is missing module name
+            LOGGER.warning(f"WARNING ⚠️ {weight} requires {e.name}, which is not in ultralytics requirements."
+                           f"\nAutoInstall will run now for {e.name} but this feature will be removed in the future."
+                           f"\nRecommend fixes are to train a new model using updated ultraltyics package or to "
+                           f"download updated models from https://github.com/ultralytics/assets/releases/tag/v0.0.0")
         check_requirements(e.name)  # install missing module
-
-        return torch.load(file, map_location='cpu'), file  # load
+        return torch.load(file, map_location='cpu')  # load
 
 
 def attempt_load_weights(weights, device=None, inplace=True, fuse=False):
     # Loads an ensemble of models weights=[a,b,c] or a single model weights=[a] or weights=a
 
-    ensemble = Ensemble()
+    model = Ensemble()
     for w in weights if isinstance(weights, list) else [weights]:
-        ckpt, w = torch_safe_load(w)  # load ckpt
+        ckpt = torch_safe_load(w)  # load ckpt
         args = {**DEFAULT_CFG_DICT, **ckpt['train_args']}  # combine model and default args, preferring model args
-        model = (ckpt.get('ema') or ckpt['model']).to(device).float()  # FP32 model
+        ckpt = (ckpt.get('ema') or ckpt['model']).to(device).float()  # FP32 model
 
         # Model compatibility updates
-        model.args = args  # attach args to model
-        model.pt_path = w  # attach *.pt file path to model
-        model.task = guess_model_task(model)
-        if not hasattr(model, 'stride'):
-            model.stride = torch.tensor([32.])
+        ckpt.args = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # attach args to model
+        ckpt.pt_path = weights  # attach *.pt file path to model
+        if not hasattr(ckpt, 'stride'):
+            ckpt.stride = torch.tensor([32.])
 
         # Append
-        ensemble.append(model.fuse().eval() if fuse and hasattr(model, 'fuse') else model.eval())  # model in eval mode
+        model.append(ckpt.fuse().eval() if fuse and hasattr(ckpt, 'fuse') else ckpt.eval())  # model in eval mode
 
     # Module compatibility updates
-    for m in ensemble.modules():
+    for m in model.modules():
         t = type(m)
         if t in (nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU, Detect, Segment):
             m.inplace = inplace  # torch 1.7.0 compatibility
@@ -390,28 +367,27 @@ def attempt_load_weights(weights, device=None, inplace=True, fuse=False):
             m.recompute_scale_factor = None  # torch 1.11.0 compatibility
 
     # Return model
-    if len(ensemble) == 1:
-        return ensemble[-1]
+    if len(model) == 1:
+        return model[-1]
 
     # Return ensemble
-    LOGGER.info(f'Ensemble created with {weights}\n')
+    print(f'Ensemble created with {weights}\n')
     for k in 'names', 'nc', 'yaml':
-        setattr(ensemble, k, getattr(ensemble[0], k))
-    ensemble.stride = ensemble[torch.argmax(torch.tensor([m.stride.max() for m in ensemble])).int()].stride
-    assert all(ensemble[0].nc == m.nc for m in ensemble), f'Models differ in class counts: {[m.nc for m in ensemble]}'
-    return ensemble
+        setattr(model, k, getattr(model[0], k))
+    model.stride = model[torch.argmax(torch.tensor([m.stride.max() for m in model])).int()].stride  # max stride
+    assert all(model[0].nc == m.nc for m in model), f'Models have different class counts: {[m.nc for m in model]}'
+    return model
 
 
 def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
     # Loads a single model weights
-    ckpt, weight = torch_safe_load(weight)  # load ckpt
+    ckpt = torch_safe_load(weight)  # load ckpt
     args = {**DEFAULT_CFG_DICT, **ckpt['train_args']}  # combine model and default args, preferring model args
     model = (ckpt.get('ema') or ckpt['model']).to(device).float()  # FP32 model
 
     # Model compatibility updates
     model.args = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # attach args to model
     model.pt_path = weight  # attach *.pt file path to model
-    model.task = guess_model_task(model)
     if not hasattr(model, 'stride'):
         model.stride = torch.tensor([32.])
 
@@ -430,55 +406,42 @@ def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
 
 
 def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
-    # Parse a YOLO model.yaml dictionary into a PyTorch model
-    import ast
-
-    # Args
-    max_channels = float('inf')
-    nc, act, scales = (d.get(x) for x in ('nc', 'act', 'scales'))
-    depth, width, kpt_shape = (d.get(x, 1.0) for x in ('depth_multiple', 'width_multiple', 'kpt_shape'))
-    if scales:
-        scale = d.get('scale')
-        if not scale:
-            scale = tuple(scales.keys())[0]
-            LOGGER.warning(f"WARNING ⚠️ no model scale passed. Assuming scale='{scale}'.")
-        depth, width, max_channels = scales[scale]
-
+    # Parse a YOLO model.yaml dictionary
+    if verbose:
+        LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
+    nc, gd, gw, act = d['nc'], d['depth_multiple'], d['width_multiple'], d.get('activation')
     if act:
         Conv.default_act = eval(act)  # redefine default activation, i.e. Conv.default_act = nn.SiLU()
         if verbose:
             LOGGER.info(f"{colorstr('activation:')} {act}")  # print
 
-    if verbose:
-        LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
-    ch = [ch]
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     for i, (f, n, m, args) in enumerate(d['backbone'] + d['head']):  # from, number, module, args
-        m = getattr(torch.nn, m[3:]) if 'nn.' in m else globals()[m]  # get module
+        m = eval(m) if isinstance(m, str) else m  # eval strings
         for j, a in enumerate(args):
-            if isinstance(a, str):
-                with contextlib.suppress(ValueError):
-                    args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
+            with contextlib.suppress(NameError):
+                args[j] = eval(a) if isinstance(a, str) else a  # eval strings
 
-        n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
-        if m in (Classify, Conv, ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
-                 BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x):
+        n = n_ = max(round(n * gd), 1) if n > 1 else n  # depth gain
+        if m in {
+                Classify, Conv, ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
+                BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, nn.ConvTranspose2d, DWConvTranspose2d, C3x}:
             c1, c2 = ch[f], args[0]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-                c2 = make_divisible(min(c2, max_channels) * width, 8)
+                c2 = make_divisible(c2 * gw, 8)
 
             args = [c1, c2, *args[1:]]
-            if m in (BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, C3x):
+            if m in {BottleneckCSP, C1, C2, C2f, C3, C3TR, C3Ghost, C3x}:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
-        elif m in (Detect, Segment, Pose):
+        elif m in {Detect, Segment}:
             args.append([ch[x] for x in f])
             if m is Segment:
-                args[2] = make_divisible(min(args[2], max_channels) * width, 8)
+                args[2] = make_divisible(args[2] * gw, 8)
         else:
             c2 = ch[f]
 
@@ -496,41 +459,6 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     return nn.Sequential(*layers), sorted(save)
 
 
-def yaml_model_load(path):
-    import re
-
-    path = Path(path)
-    if path.stem in (f'yolov{d}{x}6' for x in 'nsmlx' for d in (5, 8)):
-        new_stem = re.sub(r'(\d+)([nslmx])6(.+)?$', r'\1\2-p6\3', path.stem)
-        LOGGER.warning(f'WARNING ⚠️ Ultralytics YOLO P6 models now use -p6 suffix. Renaming {path.stem} to {new_stem}.')
-        path = path.with_stem(new_stem)
-
-    unified_path = re.sub(r'(\d+)([nslmx])(.+)?$', r'\1\3', str(path))  # i.e. yolov8x.yaml -> yolov8.yaml
-    yaml_file = check_yaml(unified_path, hard=False) or check_yaml(path)
-    d = yaml_load(yaml_file)  # model dict
-    d['scale'] = guess_model_scale(path)
-    d['yaml_file'] = str(path)
-    return d
-
-
-def guess_model_scale(model_path):
-    """
-    Takes a path to a YOLO model's YAML file as input and extracts the size character of the model's scale.
-    The function uses regular expression matching to find the pattern of the model scale in the YAML file name,
-    which is denoted by n, s, m, l, or x. The function returns the size character of the model scale as a string.
-
-    Args:
-        model_path (str or Path): The path to the YOLO model's YAML file.
-
-    Returns:
-        (str): The size character of the model's scale, which can be n, s, m, l, or x.
-    """
-    with contextlib.suppress(AttributeError):
-        import re
-        return re.search(r'yolov\d+([nslmx])', Path(model_path).stem).group(1)  # n, s, m, l, or x
-    return ''
-
-
 def guess_model_task(model):
     """
     Guess the task of a PyTorch model from its architecture or configuration.
@@ -539,61 +467,43 @@ def guess_model_task(model):
         model (nn.Module) or (dict): PyTorch model or model configuration in YAML format.
 
     Returns:
-        str: Task of the model ('detect', 'segment', 'classify', 'pose').
+        str: Task of the model ('detect', 'segment', 'classify').
 
     Raises:
         SyntaxError: If the task of the model could not be determined.
     """
-
-    def cfg2task(cfg):
-        # Guess from YAML dictionary
-        m = cfg['head'][-1][-2].lower()  # output module name
-        if m in ('classify', 'classifier', 'cls', 'fc'):
-            return 'classify'
-        if m == 'detect':
-            return 'detect'
-        if m == 'segment':
-            return 'segment'
-        if m == 'pose':
-            return 'pose'
-
-    # Guess from model cfg
+    cfg = None
     if isinstance(model, dict):
-        with contextlib.suppress(Exception):
-            return cfg2task(model)
-
-    # Guess from PyTorch model
-    if isinstance(model, nn.Module):  # PyTorch model
+        cfg = model
+    elif isinstance(model, nn.Module):  # PyTorch model
         for x in 'model.args', 'model.model.args', 'model.model.model.args':
             with contextlib.suppress(Exception):
                 return eval(x)['task']
         for x in 'model.yaml', 'model.model.yaml', 'model.model.model.yaml':
             with contextlib.suppress(Exception):
-                return cfg2task(eval(x))
+                cfg = eval(x)
+                break
 
+    # Guess from YAML dictionary
+    if cfg:
+        m = cfg["head"][-1][-2].lower()  # output module name
+        if m in ["classify", "classifier", "cls", "fc"]:
+            return "classify"
+        if m in ["detect"]:
+            return "detect"
+        if m in ["segment"]:
+            return "segment"
+
+    # Guess from PyTorch model
+    if isinstance(model, nn.Module):
         for m in model.modules():
             if isinstance(m, Detect):
-                return 'detect'
+                return "detect"
             elif isinstance(m, Segment):
-                return 'segment'
+                return "segment"
             elif isinstance(m, Classify):
-                return 'classify'
-            elif isinstance(m, Pose):
-                return 'pose'
-
-    # Guess from model filename
-    if isinstance(model, (str, Path)):
-        model = Path(model)
-        if '-seg' in model.stem or 'segment' in model.parts:
-            return 'segment'
-        elif '-cls' in model.stem or 'classify' in model.parts:
-            return 'classify'
-        elif '-pose' in model.stem or 'pose' in model.parts:
-            return 'pose'
-        elif 'detect' in model.parts:
-            return 'detect'
+                return "classify"
 
     # Unable to determine task from model
-    LOGGER.warning("WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. "
-                   "Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify', or 'pose'.")
-    return 'detect'  # assume detect
+    raise SyntaxError("YOLO is unable to automatically guess model task. Explicitly define task for your model, "
+                      "i.e. 'task=detect', 'task=segment' or 'task=classify'.")

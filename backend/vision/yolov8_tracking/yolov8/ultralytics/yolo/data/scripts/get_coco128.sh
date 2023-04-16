@@ -1,9 +1,9 @@
 #!/bin/bash
-# Ultralytics YOLO 🚀, AGPL-3.0 license
+# Ultralytics YOLO 🚀, GPL-3.0 license
 # Download COCO128 dataset https://www.kaggle.com/ultralytics/coco128 (first 128 images from COCO train2017)
 # Example usage: bash data/scripts/get_coco128.sh
 # parent
-# ├── ultralytics
+# ├── yolov5
 # └── datasets
 #     └── coco128  ← downloads here
 
