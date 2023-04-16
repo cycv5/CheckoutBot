@@ -1,6 +1,7 @@
 import argparse
 import cv2
 import os
+
 # limit the number of cpus used by high performance libraries
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -36,7 +37,8 @@ from yolov8.ultralytics.yolo.utils import DEFAULT_CFG, LOGGER, SETTINGS, callbac
 from yolov8.ultralytics.yolo.utils.checks import check_file, check_imgsz, check_imshow, print_args, check_requirements
 from yolov8.ultralytics.yolo.utils.files import increment_path
 from yolov8.ultralytics.yolo.utils.torch_utils import select_device
-from yolov8.ultralytics.yolo.utils.ops import Profile, non_max_suppression, scale_boxes, process_mask, process_mask_native
+from yolov8.ultralytics.yolo.utils.ops import Profile, non_max_suppression, scale_boxes, process_mask, \
+    process_mask_native
 from yolov8.ultralytics.yolo.utils.plotting import Annotator, colors, save_one_box
 
 from trackers.multi_tracker_zoo import create_tracker
@@ -78,7 +80,9 @@ def run(
         vid_stride=1,  # video frame-rate stride
         retina_masks=False,
 ):
-
+    ROI = [(100, 100), (600, 600)]
+    see = {}
+    checked = set()
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     is_file = Path(source).suffix[1:] in (VID_FORMATS)
@@ -141,7 +145,7 @@ def run(
     outputs = [None] * bs
 
     # Run tracking
-    #model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
+    # model.warmup(imgsz=(1 if pt else bs, 3, *imgsz))  # warmup
     seen, windows, dt = 0, [], (Profile(), Profile(), Profile(), Profile())
     curr_frames, prev_frames = [None] * bs, [None] * bs
     for frame_idx, batch in enumerate(dataset):
@@ -166,7 +170,7 @@ def run(
                 proto = preds[1][-1]
             else:
                 p = non_max_suppression(preds, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)
-            
+
         # Process detections
         for i, det in enumerate(p):  # detections per image
             seen += 1
@@ -194,7 +198,7 @@ def run(
             imc = im0.copy() if save_crop else im0  # for save_crop
 
             annotator = Annotator(im0, line_width=line_thickness, example=str(names))
-            
+
             if hasattr(tracker_list[i], 'tracker') and hasattr(tracker_list[i].tracker, 'camera_update'):
                 if prev_frames[i] is not None and curr_frames[i] is not None:  # camera motion compensation
                     tracker_list[i].tracker.camera_update(prev_frames[i], curr_frames[i])
@@ -220,10 +224,10 @@ def run(
                 # pass detections to strongsort
                 with dt[3]:
                     outputs[i] = tracker_list[i].update(det.cpu(), im0)
-                
+
                 # draw boxes for visualization
                 if len(outputs[i]) > 0:
-                    
+
                     if is_seg:
                         # Mask plotting
                         annotator.masks(
@@ -232,13 +236,42 @@ def run(
                             im_gpu=torch.as_tensor(im0, dtype=torch.float16).to(device).permute(2, 0, 1).flip(0).contiguous() /
                             255 if retina_masks else im[i]
                         )
-                    
+
                     for j, (output) in enumerate(outputs[i]):
-                        
+
                         bbox = output[0:4]
                         id = output[4]
                         cls = output[5]
                         conf = output[6]
+
+                        cls_int = int(cls)
+
+                        bbox_w_mid = (output[2] + output[0]) // 2
+                        bbox_h_mid = (output[3] + output[1]) // 2
+
+                        if id in see:
+                            see[id][0] = [bbox_w_mid, bbox_h_mid]
+                            d = see[id][1]
+                            if cls_int in d:
+                                d[cls_int] += 1
+                            else:
+                                d[cls_int] = 1
+                        else:
+                            see[id] = [[bbox_w_mid, bbox_h_mid], {cls_int: 1}]
+
+                        if (bbox[0] >= ROI[0][0] and bbox[1] >= ROI[0][1] and bbox[2] <= ROI[1][0] and
+                                bbox[3] <= ROI[1][1]):  # in ROI
+                            # Entries are in the format of {unique_index:[location, {class: count}]}
+                            cls_d = see[id][1]
+                            max_cls = max(cls_d, key=cls_d.get)
+                            if id not in checked:
+                                checked.add(id)
+                                print("!NEW! Item in ROI. id: {}, location: {}, class: {}".format(id, see[id][0],
+                                                                                                  max_cls))
+                            else:
+                                print("Item in ROI id: {}, location: {}, class: {}".format(id, see[id][0], max_cls))
+                            annotator.box_label([bbox_w_mid - 3, bbox_h_mid - 3, bbox_w_mid + 3, bbox_h_mid + 3], "loc",
+                                                color=colors(0, True))
 
                         if save_txt:
                             # to MOT format
@@ -254,22 +287,26 @@ def run(
                         if save_vid or save_crop or show_vid:  # Add bbox/seg to image
                             c = int(cls)  # integer class
                             id = int(id)  # integer id
-                            label = None if hide_labels else (f'{id} {names[c]}' if hide_conf else \
-                                (f'{id} {conf:.2f}' if hide_class else f'{id} {names[c]} {conf:.2f}'))
+                            label = None if hide_labels else (f'{id} {names[c]}' if hide_conf else (f'{id} {conf:.2f}' if hide_class else f'{id} {names[c]} {conf:.2f}'))
                             color = colors(c, True)
                             annotator.box_label(bbox, label, color=color)
-                            
+
                             if save_trajectories and tracking_method == 'strongsort':
                                 q = output[7]
                                 tracker_list[i].trajectory(im0, q, color=color)
                             if save_crop:
                                 txt_file_name = txt_file_name if (isinstance(path, list) and len(path) > 1) else ''
-                                save_one_box(np.array(bbox, dtype=np.int16), imc, file=save_dir / 'crops' / txt_file_name / names[c] / f'{id}' / f'{p.stem}.jpg', BGR=True)
-                            
+                                save_one_box(np.array(bbox, dtype=np.int16), imc,
+                                             file=save_dir / 'crops' / txt_file_name / names[
+                                                 c] / f'{id}' / f'{p.stem}.jpg', BGR=True)
+
             else:
                 pass
-                #tracker_list[i].tracker.pred_n_update_all_tracks()
-                
+                # tracker_list[i].tracker.pred_n_update_all_tracks()
+
+            # show tray label
+            annotator.box_label([ROI[0][0], ROI[0][1], ROI[1][0], ROI[1][1]], "ROI", color=colors(0, True))
+
             # Stream results
             im0 = annotator.result()
             if show_vid:
@@ -298,13 +335,15 @@ def run(
                 vid_writer[i].write(im0)
 
             prev_frames[i] = curr_frames[i]
-            
+
         # Print total time (preprocessing + inference + NMS + tracking)
-        LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{sum([dt.dt for dt in dt if hasattr(dt, 'dt')]) * 1E3:.1f}ms")
+        LOGGER.info(
+            f"{s}{'' if len(det) else '(no detections), '}{sum([dt.dt for dt in dt if hasattr(dt, 'dt')]) * 1E3:.1f}ms")
 
     # Print results
     t = tuple(x.t / seen * 1E3 for x in dt)  # speeds per image
-    LOGGER.info(f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS, %.1fms {tracking_method} update per image at shape {(1, 3, *imgsz)}' % t)
+    LOGGER.info(
+        f'Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS, %.1fms {tracking_method} update per image at shape {(1, 3, *imgsz)}' % t)
     if save_txt or save_vid:
         s = f"\n{len(list((save_dir / 'tracks').glob('*.txt')))} tracks saved to {save_dir / 'tracks'}" if save_txt else ''
         LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
@@ -314,11 +353,13 @@ def run(
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--yolo-weights', nargs='+', type=Path, default=WEIGHTS / 'yolov8s-seg.pt', help='model.pt path(s)')
+    parser.add_argument('--yolo-weights', nargs='+', type=Path, default=WEIGHTS / 'yolov8s-seg.pt',
+                        help='model.pt path(s)')
     parser.add_argument('--reid-weights', type=Path, default=WEIGHTS / 'osnet_x0_25_msmt17.pt')
-    parser.add_argument('--tracking-method', type=str, default='deepocsort', help='deepocsort, botsort, strongsort, ocsort, bytetrack')
+    parser.add_argument('--tracking-method', type=str, default='deepocsort',
+                        help='deepocsort, botsort, strongsort, ocsort, bytetrack')
     parser.add_argument('--tracking-config', type=Path, default=None)
-    parser.add_argument('--source', type=str, default='0', help='file/dir/URL/glob, 0 for webcam')  
+    parser.add_argument('--source', type=str, default='0', help='file/dir/URL/glob, 0 for webcam')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640], help='inference size h,w')
     parser.add_argument('--conf-thres', type=float, default=0.5, help='confidence threshold')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='NMS IoU threshold')
