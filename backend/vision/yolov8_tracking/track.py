@@ -11,10 +11,12 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import sys
 import platform
+import math
 import numpy as np
 from pathlib import Path
 import torch
 import torch.backends.cudnn as cudnn
+from pyzbar.pyzbar import decode
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # yolov5 strongsort root directory
@@ -80,9 +82,14 @@ def run(
         vid_stride=1,  # video frame-rate stride
         retina_masks=False,
 ):
+    # Custom parameters
     ROI = [(100, 100), (600, 600)]
     see = {}
-    checked = set()
+    stage = {}
+    WAIT = 10  # How long should I wait until an item is considered to have stopped moving (in frames)
+    MOVE_THRESHOLD = 15  # Max euclidean dist of movement allow for stopped object
+
+
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
     is_file = Path(source).suffix[1:] in (VID_FORMATS)
@@ -264,12 +271,40 @@ def run(
                             # Entries are in the format of {unique_index:[location, {class: count}]}
                             cls_d = see[id][1]
                             max_cls = max(cls_d, key=cls_d.get)
-                            if id not in checked:
-                                checked.add(id)
-                                print("!NEW! Item in ROI. id: {}, location: {}, class: {}".format(id, see[id][0],
-                                                                                                  max_cls))
-                            else:
-                                print("Item in ROI id: {}, location: {}, class: {}".format(id, see[id][0], max_cls))
+                            if id not in stage:  # first appears in the ROI
+                                stage[id] = [[bbox_w_mid, bbox_h_mid]]
+                                print("!NEW! Item in ROI -- id: {}, location: {}, class: {}".format(id, see[id][0], max_cls))
+                            else:  # multiple appearance, determine if we want to report to software
+                                report = True
+                                stage[id].append([bbox_w_mid, bbox_h_mid])
+                                len_stage = len(stage[id])
+                                for index in range(min(WAIT, len_stage) - 1):
+                                    rev_index = len_stage - index - 1
+                                    b = stage[id][rev_index]
+                                    a = stage[id][rev_index - 1]
+                                    euclid_dist = math.dist(a, b)
+                                    if euclid_dist >= MOVE_THRESHOLD:
+                                        report = False
+                                        break
+                                if report:
+                                    print("****Item is ready for pickup**** id: {}, location: {}, class: {}".format(id, see[id][0], max_cls))
+                                    print("Scanning for barcode...")
+                                    barcode_out = ""
+                                    bbox_left = output[0]
+                                    bbox_top = output[1]
+                                    bbox_w = output[2] - output[0]
+                                    bbox_h = output[3] - output[1]
+                                    crop_img = im0[bbox_top:bbox_top+bbox_h, bbox_left:bbox_left+bbox_w]
+                                    detectedBarcodes = decode(crop_img)
+                                    for barcode in detectedBarcodes:
+                                        if barcode.data != "":
+                                            barcode_out = barcode.data
+                                    if barcode_out == "":
+                                        print("No barcode detected")
+                                    else:
+                                        print("Barcode result: {}".format(barcode_out))
+                                    print("Sending results thru HTTP POST...")
+
                             annotator.box_label([bbox_w_mid - 3, bbox_h_mid - 3, bbox_w_mid + 3, bbox_h_mid + 3], "loc",
                                                 color=colors(0, True))
 
