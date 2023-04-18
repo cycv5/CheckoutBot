@@ -1,6 +1,7 @@
 import argparse
 import cv2
 import os
+import requests
 
 # limit the number of cpus used by high performance libraries
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -308,7 +309,6 @@ def run(
                                         bbox_w = output[2] - output[0]
                                         bbox_h = output[3] - output[1]
                                         crop_img = im0[bbox_top:bbox_top+bbox_h, bbox_left:bbox_left+bbox_w]
-                                        cv2.imwrite("/content/crop_{}.jpg".format(id), crop_img)
                                         detectedBarcodes = decode(crop_img)
                                         for barcode in detectedBarcodes:
                                             if barcode.data != "":
@@ -318,6 +318,13 @@ def run(
                                         else:
                                             print("Barcode result: {}".format(barcode_out))
                                         print("Sending results thru HTTP POST...")
+                                        url = 'https://localhost:8080/new-item'
+                                        payload = {"id": id,
+                                                   "location": see[id][0],
+                                                   "class": max_cls,
+                                                   "barcode": barcode_out}
+                                        x = requests.post(url, json=payload)
+                                        print("HTTP response: {}".format(x.status_code))
                                         reported.add(id)
 
                                 annotator.box_label([bbox_w_mid - 3, bbox_h_mid - 3, bbox_w_mid + 3, bbox_h_mid + 3],
