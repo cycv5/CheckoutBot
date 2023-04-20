@@ -12,17 +12,30 @@ function preventDefault(event) {
 
 
 
-export default function Deposits() {
+export default function Deposits(props) {
+  const [totalBill, setTotalBill] = React.useState(0)
+  const [totalTax, setTotalTax] = React.useState(0)
 
-
+    React.useEffect(()=>{
+      var totalBill = 0
+      var totalTax = 0
+      console.log("DEPOSITS", props.items)
+      props.items.forEach(element => {
+        console.log(element, "ELEMENT")
+        totalBill = totalBill + element.price
+        totalTax = totalTax + element.tax
+      });
+      setTotalBill(Math.round(totalBill * 100) / 100)
+      setTotalTax(Math.round(totalTax * 100) / 100)
+    }, [props.items])
   return (
     <React.Fragment>
       <Title>Total Bill</Title>
       <Typography component="p" variant="h4">
-        $1,024.00
+        ${totalBill}
       </Typography>
       <Typography color="text.secondary" sx={{ flex: 1 }}>
-       incl. $120 HST
+       incl. ${totalTax} HST
       </Typography>
       <div>
       <Button variant="contained">Pay Now</Button>
