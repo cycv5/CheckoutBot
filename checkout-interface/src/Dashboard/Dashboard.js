@@ -187,7 +187,7 @@ function DashboardContent(props) {
                     height: 240,
                   }}
                 >
-                  <Deposits />
+                  <Deposits items={props.items} />
                 </Paper>
               </Grid>
               {/* Recent Orders */}
