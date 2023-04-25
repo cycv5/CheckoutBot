@@ -32,8 +32,14 @@ def test_disconnect():
 # Client Event
 @app.route('/new-item', methods=[ 'POST'])
 def handleNewClient():
-    barcode = request.form.get('barcode')
-    print('New item scanned: ', barcode )
+    item = request.get_json(force=True)
+    barcode= item.get("barcode")
+    id= item.get("id")
+    obj_class= item.get("class")
+    location= item.get("location")
+
+
+    print('New item scanned: ', item, barcode, id, obj_class, location )
     item =  get_item_from_barcode(barcode)[0]
     print(item)
     socketio.emit('new_item_scanned',{"barcode":item[0], "name": item[1], "price": item[2], "tax": item[3]}, broadcast = True)
