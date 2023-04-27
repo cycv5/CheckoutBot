@@ -84,7 +84,7 @@ def run(
         retina_masks=False,
 ):
     # Custom parameters
-    ROI = [(100, 100), (600, 600)]
+    ROI = [(50,50), (590, 430)]
     see = {}
     stage = {}
     WAIT = 10  # How long should I wait until an item is considered to have stopped moving (in frames)
@@ -304,10 +304,11 @@ def run(
                                         print("****Item is ready for pickup**** id: {}, location: {}, class: {}".format(id, see[id][0], max_cls))
                                         print("Scanning for barcode...")
                                         barcode_out = ""
-                                        bbox_left = output[0]
-                                        bbox_top = output[1]
-                                        bbox_w = output[2] - output[0]
-                                        bbox_h = output[3] - output[1]
+                                        bbox_left = int(output[0])
+                                        bbox_top = int(output[1])
+                                        bbox_w = int(output[2] - output[0])
+                                        bbox_h = int(output[3] - output[1])
+
                                         crop_img = im0[bbox_top:bbox_top+bbox_h, bbox_left:bbox_left+bbox_w]
                                         detectedBarcodes = decode(crop_img)
                                         for barcode in detectedBarcodes:
@@ -318,7 +319,7 @@ def run(
                                         else:
                                             print("Barcode result: {}".format(barcode_out))
                                         print("Sending results thru HTTP POST...")
-                                        url = 'https://localhost:8080/new-item'
+                                        url = 'http://127.0.0.1:5000/new-item'
                                         payload = {"id": id,
                                                    "location": see[id][0],
                                                    "class": max_cls,
