@@ -50,7 +50,7 @@ function App() {
   return (
     
     <div className="App">
-    <Dashboard items={items}/>
+    <Dashboard items={items} setItems={setItems}/>
     {/* <button onClick={handleLogin}>Hello</button> */}
     </div>
    

@@ -1,7 +1,7 @@
-from flask import Flask, request
+from flask import Flask, request, abort, render_template_string
 from flask_socketio import SocketIO, send, emit
 from flask_cors import CORS
-from database import get_item_from_barcode
+from database import get_item_from_barcode, get_item_from_class
 
 """ from gevent.pywsgi import WSGIServer
 from geventwebsocket.handler import WebSocketHandler """
@@ -38,10 +38,15 @@ def handleNewClient():
     obj_class= item.get("class")
     location= item.get("location")
 
-
-    print('New item scanned: ', item, barcode, id, obj_class, location )
-    item =  get_item_from_barcode(barcode)[0]
-    print(item)
+    if (barcode is None or barcode == "") and (obj_class is None or  obj_class == ""):
+         return render_template_string('Item Not Found {{ errorCode }}', errorCode='404'), 404
+    print('New item information received: ', item, barcode, id, obj_class, location )
+    if barcode is not None and barcode != "":
+        item =  get_item_from_barcode(barcode)
+    else:
+        item =  get_item_from_class(obj_class)
+    if item is None:
+         return render_template_string('Item Not Found {{ errorCode }}', errorCode='404'), 404
     socketio.emit('new_item_scanned',{"barcode":item[0], "name": item[1], "price": item[2], "tax": item[3]}, broadcast = True)
     return "Done"
 

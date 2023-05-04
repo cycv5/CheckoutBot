@@ -193,7 +193,7 @@ function DashboardContent(props) {
               {/* Recent Orders */}
               <Grid item xs={12}>
                 <Paper sx={{ p: 2, display: 'flex', flexDirection: 'column' }}>
-                  <Orders items={props.items} />
+                  <Orders items={props.items} setItems={props.setItems} />
                 </Paper>
               </Grid>
             </Grid>
@@ -210,5 +210,5 @@ export default function Dashboard(props) {
     console.log("Props changed")
     console.log(props)
   }, [props])
-  return (<DashboardContent items={props.items}/>);
+  return (<DashboardContent items={props.items} setItems={props.setItems}/>);
 }

@@ -26,5 +26,14 @@ def get_item_from_barcode(barcode):
     # res = cursor.execute("SELECT sql FROM sqlite_master WHERE tbl_name = 'table_name' AND type = 'table';")
     items = res.fetchall()
     conn.commit()
-    return items
+    return items[0] if len(items) >= 1 else None
+
+def get_item_from_class(item_class):
+    conn = create_connection(r"./checkoutdb.db")
+    cursor = conn.cursor()
+    res = cursor.execute("SELECT * from 'items' where class='"+item_class+"' LIMIT 1; ")
+    # res = cursor.execute("SELECT sql FROM sqlite_master WHERE tbl_name = 'table_name' AND type = 'table';")
+    items = res.fetchall()
+    conn.commit()
+    return items[0] if len(items) >= 1 else None
 

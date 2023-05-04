@@ -57,8 +57,13 @@ function preventDefault(event) {
 export default function Orders(props) {
   React.useEffect(()=>{
     console.log("ORDERS", props.items)
-    setTableRows(props.items.map((item)=>{return createData(1, item.barcode, item.name, item.price, item.tax, item.price+item.tax) }))
+    setTableRows(props.items.map((item, key)=>{return createData(key, item.barcode, item.name, item.price, item.tax, item.price+item.tax) }))
   }, [props.items])
+
+  const deleteItem = (itemRow) => {
+    props.setItems(props.items.filter((item, key)=> key !== itemRow.id))
+
+  }
 
   const [tableRows, setTableRows] = React.useState([])
   return (
@@ -83,7 +88,7 @@ export default function Orders(props) {
               <TableCell>${row.shipTo}</TableCell>
               <TableCell>${row.paymentMethod}</TableCell>
               <TableCell align="right">{`$${row.amount}`}</TableCell>
-              <TableCell align="right">{<DeleteOutlineIcon fontSize="small"/>}</TableCell>
+              <TableCell align="right">{<DeleteOutlineIcon style={{cursor: 'pointer'}} onClick={()=>deleteItem(row)} fontSize="small"/>}</TableCell>
             </TableRow>
           ))}
         </TableBody>
