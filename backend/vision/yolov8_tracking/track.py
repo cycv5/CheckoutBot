@@ -318,13 +318,14 @@ def run(
                                             print("No barcode detected")
                                         else:
                                             print("Barcode result: {}".format(barcode_out))
-                                        print("Sending results thru HTTP POST...")
+                                        print("Sending results thru HTTP POST...\n\n")
                                         url = 'http://127.0.0.1:5000/new-item'
                                         payload = {"id": id,
                                                    "location": see[id][0],
                                                    "class": max_cls,
-                                                   "barcode": barcode_out}
-                                        x = requests.post(url, json=payload)
+                                                   "barcode": barcode_out,
+                                                   "image": crop_img}
+                                        x = requests.post(url, data=payload)
                                         print("HTTP response: {}".format(x.status_code))
                                         reported.add(id)
 
