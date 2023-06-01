@@ -84,6 +84,8 @@ def run(
         retina_masks=False,
 ):
     # Custom parameters
+    id_2_class = {47: "apple", 46: "banana", 49: "orange", 48: "sandwich", 50: "broccoli", 51: "carrot", 53: "pizza",
+                  52: "hotdog", 54: "donut", 55: "cake", 39: "bottle", 32: "sports ball"}
     ROI = [(50,50), (590, 430)]
     see = {}
     stage = {}
@@ -318,14 +320,13 @@ def run(
                                             print("No barcode detected")
                                         else:
                                             print("Barcode result: {}".format(barcode_out))
-                                        print("Sending results thru HTTP POST...\n\n")
+                                        print("Sending results thru HTTP POST...\n")
                                         url = 'http://127.0.0.1:5000/new-item'
                                         payload = {"id": id,
                                                    "location": see[id][0],
-                                                   "class": max_cls,
-                                                   "barcode": barcode_out,
-                                                   "image": crop_img}
-                                        x = requests.post(url, data=payload)
+                                                   "class": id_2_class[max_cls],
+                                                   "barcode": barcode_out}
+                                        x = requests.post(url, json=payload)
                                         print("HTTP response: {}".format(x.status_code))
                                         reported.add(id)
 
